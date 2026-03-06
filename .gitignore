@@ -1,0 +1,5 @@
+ClaudeTouchBar.app/Contents/MacOS/ClaudeTouchBar
+*.o
+*.swp
+.DS_Store
+/tmp/
