@@ -14,6 +14,7 @@ swiftc \
     -framework AppKit \
     -F /System/Library/PrivateFrameworks \
     -framework DFRFoundation \
+    -target x86_64-apple-macosx12.0 \
     -o ClaudeTouchBar.app/Contents/MacOS/ClaudeTouchBar \
     ClaudeTouchBar.swift
 

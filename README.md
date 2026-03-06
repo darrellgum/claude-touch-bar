@@ -25,8 +25,21 @@ Tap the Touch Bar item to instantly bring Terminal.app to the foreground.
 ## Requirements
 
 - MacBook Pro with Touch Bar (2016–2020 models)
-- macOS with Xcode Command Line Tools (`xcode-select --install`)
+- macOS 12 Monterey or later (tested on macOS 26 Tahoe)
+- Xcode Command Line Tools (`xcode-select --install`)
 - Terminal.app running [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
+
+### Compatibility
+
+| macOS | Version | Status |
+|-------|---------|--------|
+| Tahoe | 26 | Tested, works |
+| Sequoia | 15 | Should work (untested) |
+| Sonoma | 14 | Should work (untested) |
+| Ventura | 13 | Should work (untested) |
+| Monterey | 12 | Minimum supported |
+
+The Touch Bar APIs (`DFRFoundation`) have been available since macOS 10.12.2, but the build targets macOS 12+ for Swift runtime compatibility. All Touch Bar MacBook Pros (2016–2020, Intel x86_64) are supported. If you test on a version marked "untested", please open an issue and let us know!
 
 ## Quick start
 
