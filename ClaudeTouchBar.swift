@@ -5,15 +5,16 @@ let statusFilePath = "/tmp/claude-touchbar-status"
 
 let spinnerFrames: [Character] = ["·","✢","✳","✶","✻","✽"]
 
-// Claude Code theme colors (dark mode)
-// Normal working: "claude" theme = rgb(215,119,87)
+// Claude Code theme colors (dark mode) — extracted from binary
 let claudeColor = NSColor(red: 215.0/255, green: 119.0/255, blue: 87.0/255, alpha: 1)
-// Stalled target: rgb(171,43,63) — shifts toward this when no tokens for 3+ seconds
+let claudeShimmerColor = NSColor(red: 245.0/255, green: 149.0/255, blue: 117.0/255, alpha: 1)
 let stalledColor = NSColor(red: 171.0/255, green: 43.0/255, blue: 63.0/255, alpha: 1)
-// Tool shimmer: "claudeShimmer" = rgb(235,159,127)
-let shimmerColor = NSColor(red: 235.0/255, green: 159.0/255, blue: 127.0/255, alpha: 1)
+// Tool use base and shimmer (claudeShimmer used as base in tool mode)
+let toolColor = NSColor(red: 235.0/255, green: 159.0/255, blue: 127.0/255, alpha: 1)
+let toolShimmerColor = NSColor(red: 255.0/255, green: 189.0/255, blue: 157.0/255, alpha: 1)
 // Idle
-let idleTextColor = NSColor(red: 120.0/255, green: 120.0/255, blue: 120.0/255, alpha: 1)
+let idleTextColor = NSColor(red: 102.0/255, green: 102.0/255, blue: 102.0/255, alpha: 1)
+let idleShimmerColor = NSColor(red: 142.0/255, green: 142.0/255, blue: 142.0/255, alpha: 1)
 let bgColor = NSColor.black
 
 /// Interpolate between two colors
@@ -43,9 +44,12 @@ func log(_ msg: String) {
 // MARK: - Custom Touch Bar View
 
 class TouchBarLabel: NSView {
-    var text: String = "  Claude Ready  " { didSet { needsDisplay = true } }
-    var textColor: NSColor = idleTextColor { didSet { needsDisplay = true } }
+    var attributedText: NSAttributedString? { didSet { needsDisplay = true } }
+    var plainText: String = "  Claude Ready  " { didSet { needsDisplay = true } }
+    var plainColor: NSColor = idleTextColor { didSet { needsDisplay = true } }
     var onTap: (() -> Void)?
+
+    private let font = NSFont.systemFont(ofSize: 15, weight: .medium)
 
     override func mouseDown(with event: NSEvent) {
         onTap?()
@@ -67,10 +71,13 @@ class TouchBarLabel: NSView {
     }
 
     override var intrinsicContentSize: NSSize {
-        let attr: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 15, weight: .medium)
-        ]
-        let size = (text as NSString).size(withAttributes: attr)
+        let size: NSSize
+        if let attrText = attributedText {
+            size = attrText.size()
+        } else {
+            let attr: [NSAttributedString.Key: Any] = [.font: font]
+            size = (plainText as NSString).size(withAttributes: attr)
+        }
         return NSSize(width: size.width + 16, height: 30)
     }
 
@@ -78,19 +85,32 @@ class TouchBarLabel: NSView {
         bgColor.setFill()
         bounds.fill()
 
-        let attr: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 15, weight: .medium),
-            .foregroundColor: textColor
-        ]
-        let size = (text as NSString).size(withAttributes: attr)
-        let x = (bounds.width - size.width) / 2
-        let y = (bounds.height - size.height) / 2
-        (text as NSString).draw(at: NSPoint(x: x, y: y), withAttributes: attr)
+        if let attrText = attributedText {
+            let size = attrText.size()
+            let x = (bounds.width - size.width) / 2
+            let y = (bounds.height - size.height) / 2
+            attrText.draw(at: NSPoint(x: x, y: y))
+        } else {
+            let attr: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: plainColor
+            ]
+            let size = (plainText as NSString).size(withAttributes: attr)
+            let x = (bounds.width - size.width) / 2
+            let y = (bounds.height - size.height) / 2
+            (plainText as NSString).draw(at: NSPoint(x: x, y: y), withAttributes: attr)
+        }
     }
 
-    func updateContent(_ newText: String, color: NSColor) {
-        text = newText
-        textColor = color
+    func updatePlain(_ text: String, color: NSColor) {
+        attributedText = nil
+        plainText = text
+        plainColor = color
+        invalidateIntrinsicContentSize()
+    }
+
+    func updateAttributed(_ attrStr: NSAttributedString) {
+        attributedText = attrStr
         invalidateIntrinsicContentSize()
     }
 }
@@ -144,13 +164,9 @@ class TouchBarController: NSObject, NSTouchBarDelegate {
         Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
             self?.checkStatusFile()
         }
-        // Animation tick
-        Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
-            self?.spinnerTick()
-        }
-        // Stalled color update (smooth, 50ms like Claude Code)
+        // Main animation tick at 50ms (matches Claude Code's shimmer interval)
         Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
-            self?.updateStalledColor()
+            self?.animationTick()
         }
 
         log("Touch Bar installed.")
@@ -197,19 +213,36 @@ class TouchBarController: NSObject, NSTouchBarDelegate {
                 currentWord = ""
                 currentMode = "idle"
                 stalledIntensity = 0
-                label.updateContent("  Claude Ready  ", color: idleTextColor)
+                label.updatePlain("  Claude Ready  ", color: idleTextColor)
                 log("Idle")
             }
         }
     }
 
-    private func updateStalledColor() {
+    // Animation state
+    private var tickCount: Int = 0
+    private var spinnerTickAccum: Int = 0
+
+    private func animationTick() {
+        tickCount += 1
+
+        // Update stalled intensity every tick (50ms, matches Claude Code)
+        updateStalledIntensity()
+
         guard !currentWord.isEmpty else { return }
 
-        // Match Claude Code's stalled detection:
-        // - After 3s with no new content: start going red
-        // - stalledIntensity ramps 0→1 over next 2s (3s to 5s)
-        // - Smooth easing: intensity += (target - intensity) * 0.1 per 50ms tick
+        // Spinner character changes every 5 ticks (250ms)
+        spinnerTickAccum += 1
+        if spinnerTickAccum >= 5 {
+            spinnerTickAccum = 0
+            spinnerFrameIndex = (spinnerFrameIndex + 1) % spinnerFrames.count
+        }
+
+        renderTouchBar()
+    }
+
+    private func updateStalledIntensity() {
+        guard !currentWord.isEmpty else { return }
         let elapsed = Date().timeIntervalSince(lastContentChangeTime)
         let targetIntensity: CGFloat
         if elapsed > 3.0 {
@@ -217,8 +250,6 @@ class TouchBarController: NSObject, NSTouchBarDelegate {
         } else {
             targetIntensity = 0
         }
-
-        // Smooth easing toward target (matches Claude Code's easing)
         let diff = targetIntensity - stalledIntensity
         if abs(diff) < 0.01 {
             stalledIntensity = targetIntensity
@@ -227,25 +258,82 @@ class TouchBarController: NSObject, NSTouchBarDelegate {
         }
     }
 
-    private func spinnerTick() {
-        guard !currentWord.isEmpty else { return }
-        spinnerFrameIndex = (spinnerFrameIndex + 1) % spinnerFrames.count
+    private func renderTouchBar() {
         let spinner = spinnerFrames[spinnerFrameIndex]
+        let displayText = "\(currentWord)…"
+        let textLen = displayText.count
 
-        // Compute color based on mode and stalled state
-        let color: NSColor
+        // Determine base and shimmer colors for current state
+        let baseColor: NSColor
+        let glimmerColor: NSColor
+
         if stalledIntensity > 0 {
-            // Stalled: interpolate claude → red based on intensity
-            color = lerpColor(claudeColor, stalledColor, stalledIntensity)
+            // Stalled: no shimmer, just the stalled color
+            let color = lerpColor(claudeColor, stalledColor, stalledIntensity)
+            let fullText = "  \(spinner)\t\(displayText)  "
+            let attr = NSAttributedString(string: fullText, attributes: [
+                .font: NSFont.systemFont(ofSize: 15, weight: .medium),
+                .foregroundColor: color
+            ])
+            label.updateAttributed(attr)
+            return
         } else if currentMode == "tool-use" || currentMode == "tool-input" {
-            // Tool use: use shimmer color
-            color = shimmerColor
+            baseColor = toolColor
+            glimmerColor = toolShimmerColor
         } else {
-            // Normal: claude theme color
-            color = claudeColor
+            baseColor = claudeColor
+            glimmerColor = claudeShimmerColor
         }
 
-        label.updateContent("  \(spinner)\t\(currentWord)…  ", color: color)
+        if currentMode == "tool-use" || currentMode == "tool-input" {
+            // Tool-use: whole-text sine pulse between base and shimmer
+            // flashOpacity = (sin(time/1000 * PI) + 1) / 2  at 50ms ticks
+            let timeMs = Double(tickCount) * 50.0
+            let flash = CGFloat((sin(timeMs / 1000.0 * .pi) + 1.0) / 2.0)
+            let color = lerpColor(baseColor, glimmerColor, flash)
+            let fullText = "  \(spinner)\t\(displayText)  "
+            let attr = NSAttributedString(string: fullText, attributes: [
+                .font: NSFont.systemFont(ofSize: 15, weight: .medium),
+                .foregroundColor: color
+            ])
+            label.updateAttributed(attr)
+        } else {
+            // Thinking/responding: 3-char-wide glimmer sweep across the word
+            // Sweep speed: 1 position per 200ms (4 ticks). Cycle = textLen + 20
+            let cycleLen = textLen + 20
+            // Sweep goes right-to-left in responding, left-to-right otherwise
+            let glimmerIndex: Int
+            if currentMode == "responding" {
+                glimmerIndex = textLen + 10 - (tickCount / 4) % cycleLen
+            } else {
+                glimmerIndex = (tickCount / 4) % cycleLen - 10
+            }
+
+            // Build attributed string: prefix + spinner + tab + per-char word + suffix
+            let result = NSMutableAttributedString()
+            let font = NSFont.systemFont(ofSize: 15, weight: .medium)
+
+            // Leading space + spinner (always base color)
+            result.append(NSAttributedString(string: "  \(spinner)\t", attributes: [
+                .font: font, .foregroundColor: baseColor
+            ]))
+
+            // Per-character coloring for the word
+            for (i, char) in displayText.enumerated() {
+                let dist = abs(i - glimmerIndex)
+                let color = dist <= 1 ? glimmerColor : baseColor
+                result.append(NSAttributedString(string: String(char), attributes: [
+                    .font: font, .foregroundColor: color
+                ]))
+            }
+
+            // Trailing space
+            result.append(NSAttributedString(string: "  ", attributes: [
+                .font: font, .foregroundColor: baseColor
+            ]))
+
+            label.updateAttributed(result)
+        }
     }
 }
 
