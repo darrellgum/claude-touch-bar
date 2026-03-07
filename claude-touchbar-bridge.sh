@@ -25,14 +25,25 @@ echo "Claude Touch Bar Bridge started."
 last_state=""
 last_word=""
 idle_count=0
-IDLE_THRESHOLD=5
+IDLE_THRESHOLD=3
 
 while true; do
-    # Read the last lines of terminal content
-    tail_content=$(osascript -e 'tell application "Terminal" to get contents of selected tab of front window' 2>/dev/null | tail -15)
+    # Get number of Terminal windows
+    win_count=$(osascript -e 'tell application "Terminal" to count windows' 2>/dev/null)
+    win_count=${win_count:-0}
 
-    # Find spinner word
-    spinner_word=$(echo "$tail_content" | grep -oE '[·✢✳✶✻✽] [A-Z][a-z]+…' | tail -1 | sed 's/^[^ ]* //;s/…$//')
+    spinner_word=""
+    tail_content=""
+
+    # Check each window's selected tab (separate calls preserve UTF-8)
+    for (( i=1; i<=win_count; i++ )); do
+        tab_content=$(osascript -e "tell application \"Terminal\" to get contents of selected tab of window $i" 2>/dev/null | tail -15)
+        found=$(echo "$tab_content" | grep -oE '[·✢✳✶✻✽] [A-Z][a-z]+…' | tail -1 | sed 's/^[^ ]* //;s/…$//')
+        if [[ -n "$found" ]]; then
+            spinner_word="$found"
+            tail_content="$tab_content"
+        fi
+    done
 
     if [[ -n "$spinner_word" ]]; then
         idle_count=0
@@ -56,8 +67,11 @@ while true; do
             mode="responding"
         fi
 
+        # Always write on every cycle so the Touch Bar app can detect
+        # activity via file modification time (prevents stalled-color sticking)
+        echo "msg:$spinner_word:$mode" > "$STATUS_FILE"
+
         if [[ "$spinner_word" != "$last_word" || "$last_state" != "working" ]]; then
-            echo "msg:$spinner_word:$mode" > "$STATUS_FILE"
             last_word="$spinner_word"
             last_state="working"
         fi
