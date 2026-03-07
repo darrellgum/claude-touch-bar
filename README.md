@@ -4,7 +4,7 @@
 
 It only took 10 years and an AI coding agent to finally justify that strip of OLED. A lightweight macOS utility that displays [Claude Code](https://docs.anthropic.com/en/docs/claude-code)'s real-time working status (spinner, activity word, and color-coded state) directly in the Touch Bar Control Strip. Works across all apps — keep coding in your editor while Claude thinks in the background.
 
-![macOS](https://img.shields.io/badge/macOS-Touch_Bar-black) ![Swift](https://img.shields.io/badge/Swift-5-orange) ![License](https://img.shields.io/badge/license-MIT-blue)
+![macOS](https://img.shields.io/badge/macOS-Touch_Bar-black) ![Swift](https://img.shields.io/badge/Swift-5-orange) ![License](https://img.shields.io/badge/license-PolyForm_NC-blue)
 
 ## Why?
 
@@ -107,4 +107,4 @@ open ClaudeTouchBar.app
 
 ## License
 
-MIT
+[PolyForm Noncommercial 1.0.0](LICENSE) — free to use, modify, and share for any noncommercial purpose. Commercial use is not permitted.

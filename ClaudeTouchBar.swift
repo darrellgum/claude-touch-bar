@@ -165,12 +165,7 @@ class TouchBarController: NSObject, NSTouchBarDelegate {
         return nil
     }
 
-    private var lastFileModTime: Date?
-
     private func checkStatusFile() {
-        // Check file modification time to detect bridge activity
-        let fileModTime = (try? FileManager.default.attributesOfItem(atPath: statusFilePath))?[.modificationDate] as? Date
-
         guard let content = try? String(contentsOfFile: statusFilePath, encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines) else { return }
 
@@ -188,17 +183,12 @@ class TouchBarController: NSObject, NSTouchBarDelegate {
                 log("Working: \(word) [\(mode)]")
             }
 
-            // Reset stalled timer if the file was freshly written
-            // (bridge writes every 300ms while spinner is active)
-            if let modTime = fileModTime, modTime != lastFileModTime {
-                lastContentChangeTime = Date()
-                if stalledIntensity > 0 {
+            if word != currentWord || mode != currentMode {
+                if word != currentWord {
+                    // New word = new content arriving = not stalled
+                    lastContentChangeTime = Date()
                     stalledIntensity = 0
                 }
-                lastFileModTime = modTime
-            }
-
-            if word != currentWord || mode != currentMode {
                 currentWord = word
                 currentMode = mode
             }
@@ -210,7 +200,6 @@ class TouchBarController: NSObject, NSTouchBarDelegate {
                 label.updateContent("  Claude Ready  ", color: idleTextColor)
                 log("Idle")
             }
-            lastFileModTime = fileModTime
         }
     }
 
