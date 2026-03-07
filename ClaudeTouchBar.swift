@@ -9,9 +9,12 @@ let spinnerFrames: [Character] = ["·","✢","✳","✶","✻","✽"]
 let claudeColor = NSColor(red: 215.0/255, green: 119.0/255, blue: 87.0/255, alpha: 1)
 let claudeShimmerColor = NSColor(red: 245.0/255, green: 149.0/255, blue: 117.0/255, alpha: 1)
 let stalledColor = NSColor(red: 171.0/255, green: 43.0/255, blue: 63.0/255, alpha: 1)
-// Tool use base and shimmer (claudeShimmer used as base in tool mode)
+// Tool use base and shimmer
 let toolColor = NSColor(red: 235.0/255, green: 159.0/255, blue: 127.0/255, alpha: 1)
 let toolShimmerColor = NSColor(red: 255.0/255, green: 189.0/255, blue: 157.0/255, alpha: 1)
+// System/compacting: claudeBlue
+let systemBlueColor = NSColor(red: 87.0/255, green: 105.0/255, blue: 247.0/255, alpha: 1)
+let systemBlueShimmerColor = NSColor(red: 117.0/255, green: 135.0/255, blue: 255.0/255, alpha: 1)
 // Idle
 let idleTextColor = NSColor(red: 102.0/255, green: 102.0/255, blue: 102.0/255, alpha: 1)
 let idleShimmerColor = NSColor(red: 142.0/255, green: 142.0/255, blue: 142.0/255, alpha: 1)
@@ -125,6 +128,7 @@ class TouchBarController: NSObject, NSTouchBarDelegate {
     private var label: TouchBarLabel!
     private var currentWord: String = ""
     private var currentMode: String = "idle"  // idle, thinking, responding, tool-use
+    private var currentTokenCount: String = ""  // tracks token counter for activity detection
     private var spinnerFrameIndex: Int = 0
 
     // Stalled detection (matches Claude Code's RRL function)
@@ -187,10 +191,11 @@ class TouchBarController: NSObject, NSTouchBarDelegate {
 
         if content.hasPrefix("msg:") {
             let parts = String(content.dropFirst("msg:".count))
-            // Format: "word" or "word:mode"
-            let components = parts.split(separator: ":", maxSplits: 1)
+            // Format: "word:mode" or "word:mode:tokencount"
+            let components = parts.split(separator: ":", maxSplits: 2)
             let word = String(components[0])
             let mode = components.count > 1 ? String(components[1]) : "thinking"
+            let tokenCount = components.count > 2 ? String(components[2]) : ""
 
             if currentWord.isEmpty {
                 spinnerFrameIndex = 0
@@ -199,14 +204,20 @@ class TouchBarController: NSObject, NSTouchBarDelegate {
                 log("Working: \(word) [\(mode)]")
             }
 
-            if word != currentWord || mode != currentMode {
-                if word != currentWord {
-                    // New word = new content arriving = not stalled
-                    lastContentChangeTime = Date()
-                    stalledIntensity = 0
-                }
+            // Reset stalled when any activity indicator changes:
+            // - word change (new spinner word = new content)
+            // - mode change (e.g. thinking → tool-use)
+            // - token count change (tokens flowing even with same word)
+            let activityChanged = word != currentWord
+                || mode != currentMode
+                || (!tokenCount.isEmpty && tokenCount != currentTokenCount)
+
+            if activityChanged {
+                lastContentChangeTime = Date()
+                stalledIntensity = 0
                 currentWord = word
                 currentMode = mode
+                currentTokenCount = tokenCount
             }
         } else if content == "idle" {
             if !currentWord.isEmpty {
@@ -277,6 +288,9 @@ class TouchBarController: NSObject, NSTouchBarDelegate {
             ])
             label.updateAttributed(attr)
             return
+        } else if currentMode == "system" {
+            baseColor = systemBlueColor
+            glimmerColor = systemBlueShimmerColor
         } else if currentMode == "tool-use" || currentMode == "tool-input" {
             baseColor = toolColor
             glimmerColor = toolShimmerColor
@@ -285,7 +299,7 @@ class TouchBarController: NSObject, NSTouchBarDelegate {
             glimmerColor = claudeShimmerColor
         }
 
-        if currentMode == "tool-use" || currentMode == "tool-input" {
+        if currentMode == "tool-use" || currentMode == "tool-input" || currentMode == "system" {
             // Tool-use: whole-text sine pulse between base and shimmer
             // flashOpacity = (sin(time/1000 * PI) + 1) / 2  at 50ms ticks
             let timeMs = Double(tickCount) * 50.0

@@ -14,6 +14,7 @@ if [[ "$1" == "demo" ]]; then
     echo "msg:Pondering:thinking" > "$STATUS_FILE"; sleep 5  # will go red (stalled)
     echo "msg:Reading:tool-use" > "$STATUS_FILE"; sleep 3
     echo "msg:Writing:tool-use" > "$STATUS_FILE"; sleep 3
+    echo "msg:Compacting:system" > "$STATUS_FILE"; sleep 3
     echo "msg:Responding:responding" > "$STATUS_FILE"; sleep 3
     echo "idle" > "$STATUS_FILE"
     echo "Demo complete."
@@ -45,15 +46,31 @@ while true; do
         fi
     done
 
+    # Also check for compacting message (blue spinner, no standard spinner word)
+    compact_detected=""
+    if [[ -z "$spinner_word" ]]; then
+        for (( i=1; i<=win_count; i++ )); do
+            tab_content=$(osascript -e "tell application \"Terminal\" to get contents of selected tab of window $i" 2>/dev/null | tail -10)
+            if echo "$tab_content" | grep -qE 'Compacting conversation'; then
+                spinner_word="Compacting"
+                tail_content="$tab_content"
+                compact_detected="1"
+                break
+            fi
+        done
+    fi
+
     if [[ -n "$spinner_word" ]]; then
         idle_count=0
 
         # Detect mode from terminal context
-        # Look for indicators near the spinner line
         mode="thinking"
 
+        # Check for compacting (system blue)
+        if [[ -n "$compact_detected" ]]; then
+            mode="system"
         # Check for tool execution indicators (⏺ Bash, ⏺ Read, ⏺ Write, etc.)
-        if echo "$tail_content" | grep -qE '⏺ (Bash|Read|Write|Edit|Glob|Grep|WebSearch|WebFetch|Agent)'; then
+        elif echo "$tail_content" | grep -qE '⏺ (Bash|Read|Write|Edit|Glob|Grep|WebSearch|WebFetch|Agent)'; then
             mode="tool-use"
         fi
 
@@ -63,13 +80,19 @@ while true; do
         fi
 
         # Check for streaming response (↓ with token count changing = responding)
+        token_count=""
         if echo "$tail_content" | grep -qE '↓ [0-9]'; then
             mode="responding"
+            token_count=$(echo "$tail_content" | grep -oE '↓ [0-9,]+' | tail -1 | sed 's/↓ //')
         fi
 
-        # Always write on every cycle so the Touch Bar app can detect
-        # activity via file modification time (prevents stalled-color sticking)
-        echo "msg:$spinner_word:$mode" > "$STATUS_FILE"
+        # Include token count when available so Swift app can detect activity
+        # Format: msg:word:mode or msg:word:mode:tokencount
+        if [[ -n "$token_count" ]]; then
+            echo "msg:$spinner_word:$mode:$token_count" > "$STATUS_FILE"
+        else
+            echo "msg:$spinner_word:$mode" > "$STATUS_FILE"
+        fi
 
         if [[ "$spinner_word" != "$last_word" || "$last_state" != "working" ]]; then
             last_word="$spinner_word"
